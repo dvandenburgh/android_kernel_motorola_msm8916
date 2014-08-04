@@ -772,7 +772,7 @@ static void do_emergency_remount(struct work_struct *work)
 	blocking_notifier_call_chain(&fs_notifier_list, 0, "reboot");
 #endif
 	spin_lock(&sb_lock);
-	list_for_each_entry(sb, &super_blocks, s_list) {
+	list_for_each_entry_reverse(sb, &super_blocks, s_list) {
 		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		sb->s_count++;
