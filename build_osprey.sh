@@ -27,7 +27,7 @@ red='\033[0;31m'
 nocol='\033[0m'
 export ARCH=arm
 export SUBARCH=arm
-export CROSS_COMPILE=/home/haha/android/kernel/toolchain/uber-4.8/bin/arm-eabi-
+export CROSS_COMPILE=/home/haha/android/kernel/toolchain/uber-6.0/bin/arm-eabi-
 export KBUILD_BUILD_USER="haha"
 export KBUILD_BUILD_HOST="FireLord"
 echo -e "$cyan***********************************************"
