@@ -40,19 +40,27 @@ rm -f flash_zip/boot.img
 
 compile_kernel ()
 {
-  echo -e "$yellow ~~~~~~~~~~Initializing defconfig~~~~~~~~~~ $nocol"
+  echo -e "$cyan***********************************************"
+  echo -e "          Initializing defconfig          "
+  echo -e "***********************************************$nocol"
   make osprey_defconfig
-  echo -e "$red     ~~~~~~~~~~Building kernel~~~~~~~~~~      $nocol"
+  echo -e "$cyan***********************************************"
+  echo -e "             Building kernel          "
+  echo -e "***********************************************$nocol"
   make -j12 zImage
   if ! [ -a $KERN_IMG ];
   then
-    echo -e "$blue Kernel Compilation failed! Fix the errors! $nocol"
+    echo -e "$red Kernel Compilation failed! Fix the errors! $nocol"
     exit 1
   fi
-  echo -e "$red     ~~~~~~~~~~Making DTB~~~~~~~~~~      $nocol"
+  echo -e "$cyan***********************************************"
+  echo -e "          	  Making DTB          "
+  echo -e "$cyan***********************************************"
   make -j12 dtbs
   $DTBTOOL -2 -o $KERNEL_DIR/arch/arm/boot/dt.img -s 2048 -p $KERNEL_DIR/scripts/dtc/ $KERNEL_DIR/arch/arm/boot/dts/
-  echo -e "$red     ~~~~~~~~~~Building modules~~~~~~~~~~      $nocol"
+  echo -e "$cyan***********************************************"
+  echo -e "         	Building modules          "
+  echo -e "$cyan***********************************************"
   make -j12 modules
 }
 
@@ -79,18 +87,21 @@ fire_kernel ()
 replace $old $ver -- $KERNEL_DIR/arch/arm/configs/osprey_defconfig
 replace $old $ver -- $KERNEL_DIR/flash_zip/META-INF/com/google/android/updater-script
 case $ch in
-  1) echo -e "$cyan     ~~~~~~~~~~Dirty~~~~~~~~~~ $nocol"
-     echo -e "$cyan     ~~~~~~~~~~Building now~~~~~~~~~~ $nocol"
+  1) echo -e "$cyan***********************************************"
+     echo -e "          	Dirty          "
+     echo -e "***********************************************$nocol"
      compile_kernel ;;
-  2) echo -e "$cyan     ~~~~~~~~~~Clean $nocol"
-     echo -e "$cyan     ~~~~~~~~~~Building now~~~~~~~~~~ $nocol"
+  2) echo -e "$cyan***********************************************"
+     echo -e "          	Clean          "
+     echo -e "***********************************************$nocol"
      make clean
      make mrproper
      compile_kernel ;;
   *) device ;;
 esac
-
+echo -e "$cyan***********************************************"
 echo -e " Converting the output into a flashable zip"
+echo -e "***********************************************$nocol"
 rm -rf firekernel_install
 mkdir -p firekernel_install
 make -j4 modules_install INSTALL_MOD_PATH=firekernel_install INSTALL_MOD_STRIP=1
