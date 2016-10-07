@@ -37,11 +37,11 @@ export KBUILD_BUILD_HOST="FireLord"
 rm -f arch/arm/boot/dts/*.dtb
 rm -f arch/arm/boot/dt.img
 rm -f flash_zip/boot.img
-echo -e "$yellow ~~~~~~~~~~Initializing defconfig~~~~~~~~~~ $nocol"
-make osprey_defconfig
 
 compile_kernel ()
 {
+  echo -e "$yellow ~~~~~~~~~~Initializing defconfig~~~~~~~~~~ $nocol"
+  make osprey_defconfig
   echo -e "$red     ~~~~~~~~~~Building kernel~~~~~~~~~~      $nocol"
   make -j12 zImage
   if ! [ -a $KERN_IMG ];
@@ -75,7 +75,6 @@ fire_kernel ()
   read dev
   echo -n " Which android mm or n : ? "
   read anv
-}
 
 replace $old $ver -- $KERNEL_DIR/arch/arm/configs/osprey_defconfig
 replace $old $ver -- $KERNEL_DIR/flash_zip/META-INF/com/google/android/updater-script
@@ -102,8 +101,9 @@ cp arch/arm/boot/dt.img flash_zip/tools/
 rm -f ~/android/kernel/upload/osprey/fire_kernel.zip
 cd flash_zip
 zip -r ../arch/arm/boot/fire_kernel.zip ./
-today=$(date +"-%Y%m%d-%H:%M")
+today=$(date +"-%d%m%Y")
 mv ~/android/kernel/motorola/msm8916/arch/arm/boot/fire_kernel.zip ~/android/kernel/upload/osprey/FireKernel-$anv-$dev-v$ver$today.zip
+}
 
 fire_kernel
 BUILD_END=$(date +"%s")
