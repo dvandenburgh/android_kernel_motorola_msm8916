@@ -1,5 +1,6 @@
-ui_print("FireKernel for Motorola G3 v6.1");
-
+ui_print("Mod     : FireKernel");
+ui_print("Version : v6.1");
+ui_print("Device  : G3, G3-TE, E2");
 assert(getprop("ro.product.device") == "surnia" ||
        getprop("ro.product.device") == "surnia_umts" ||
        getprop("ro.product.device") == "surnia_uds" ||
@@ -16,30 +17,31 @@ assert(getprop("ro.product.device") == "surnia" ||
        abort("This package is for device: surnia,osprey,merlin,lux; this device is " +
              getprop("ro.product.device") + "."););
 
-ui_print("Extracting flashing tools...");
+ui_print("Status  : Extracting flashing tools");
 package_extract_dir("tools", "/tmp");
 set_perm(0, 0, 0777, "/tmp/mkbootimg");
 set_perm(0, 0, 0777, "/tmp/unpackbootimg");
 set_perm(0, 0, 0777, "/tmp/flash_kernel.sh");
 set_progress(0.2);
 
-ui_print("Building and installing boot image...");
+ui_print("Status  : Building and installing boot image");
 run_program("/tmp/flash_kernel.sh");
 set_progress(0.6);
 
-ui_print("Cleaning up flashing tools...");
+ui_print("Status  : Cleaning up flashing tools");
 delete("/tmp/boot.img");
 delete("/tmp/mkbootimg");
 delete("/tmp/unpackbootimg");
 delete("/tmp/flash_kernel.sh");
 set_progress(0.7);
 
-ui_print("Installing kernel modules...");
+ui_print("Status  : Installing kernel modules");
 mount("ext4", "EMMC", "/dev/block/bootdevice/by-name/system", "/system");
 package_extract_dir("system", "/system");
 set_perm_recursive(0, 0, 0755, 0644, "/system/lib/modules");
 unmount("/system");
 set_progress(0.9);
 
-ui_print("Kernel installation completed!");
+ui_print("Status  : Kernel installation completed");
+ui_print("Message : Reboot Mobile");
 set_progress(1.0);
