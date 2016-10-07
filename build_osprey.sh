@@ -27,7 +27,7 @@ red='\033[0;31m'
 nocol='\033[0m'
 export ARCH=arm
 export SUBARCH=arm
-export CROSS_COMPILE=/home/haha/android/kernel/toolchain/uber-6.0/bin/arm-eabi-
+export CROSS_COMPILE=~/android/kernel/toolchain/uber-6.0/bin/arm-eabi-
 export KBUILD_BUILD_USER="haha"
 export KBUILD_BUILD_HOST="FireLord"
 echo -e "$cyan***********************************************"
@@ -42,7 +42,7 @@ echo -e " Building kernel"
 make -j12 zImage
 make -j12 dtbs
 
-/home/haha/android/kernel/osprey/source/tools/dtbToolCM -2 -o /home/haha/android/kernel/osprey/source/arch/arm/boot/dt.img -s 2048 -p /home/haha/android/kernel/osprey/source/scripts/dtc/ /home/haha/android/kernel/osprey/source/arch/arm/boot/dts/
+~/android/kernel/osprey/source/tools/dtbToolCM -2 -o ~/android/kernel/osprey/source/arch/arm/boot/dt.img -s 2048 -p ~/android/kernel/osprey/source/scripts/dtc/ ~/android/kernel/osprey/source/arch/arm/boot/dts/
 
 make -j4 modules
 echo -e " Converting the output into a flashable zip"
@@ -53,10 +53,10 @@ mkdir -p flash_zip/system/lib/modules/
 find firekernel_install/ -name '*.ko' -type f -exec cp '{}' flash_zip/system/lib/modules/ \;
 cp arch/arm/boot/zImage flash_zip/tools/
 cp arch/arm/boot/dt.img flash_zip/tools/
-rm -f /home/haha/android/kernel/osprey/upload/fire_kernel.zip
+rm -f ~/android/kernel/osprey/upload/fire_kernel.zip
 cd flash_zip
 zip -r ../arch/arm/boot/fire_kernel.zip ./
-mv /home/haha/android/kernel/osprey/source/arch/arm/boot/fire_kernel.zip /home/haha/android/kernel/osprey/upload/fire_kernel.zip
+mv ~/android/kernel/osprey/source/arch/arm/boot/fire_kernel.zip ~/android/kernel/osprey/upload/fire_kernel.zip
 BUILD_END=$(date +"%s")
 DIFF=$(($BUILD_END - $BUILD_START))
 echo -e "$yellow Build completed in $(($DIFF / 60)) minute(s) and $(($DIFF % 60)) seconds.$nocol"
