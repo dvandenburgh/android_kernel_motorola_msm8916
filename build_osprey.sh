@@ -98,7 +98,7 @@ mkdir -p flash_zip/system/lib/modules/
 find firekernel_install/ -name '*.ko' -type f -exec cp '{}' flash_zip/system/lib/modules/ \;
 cp arch/arm/boot/zImage flash_zip/tools/
 cp arch/arm/boot/dt.img flash_zip/tools/
-rm -f ~/android/kernel/upload/osprey/fire_kernel.zip
+rm -f ~/android/kernel/upload/osprey/*
 cd flash_zip
 zip -r ../arch/arm/boot/fire_kernel.zip ./
 today=$(date +"-%d%m%Y")
