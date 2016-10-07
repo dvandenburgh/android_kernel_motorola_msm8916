@@ -44,7 +44,7 @@ make -j12 dtbs
 
 ~/android/kernel/motorola/msm8916/tools/dtbToolCM -2 -o ~/android/kernel/motorola/msm8916/arch/arm/boot/dt.img -s 2048 -p ~/android/kernel/motorola/msm8916/scripts/dtc/ ~/android/kernel/motorola/msm8916/arch/arm/boot/dts/
 
-make -j4 modules
+make -j12 modules
 echo -e " Converting the output into a flashable zip"
 rm -rf firekernel_install
 mkdir -p firekernel_install
