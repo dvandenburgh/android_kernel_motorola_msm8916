@@ -77,6 +77,8 @@ fire_kernel ()
   read anv
 }
 
+replace $old $ver -- $KERNEL_DIR/arch/arm/configs/osprey_defconfig
+replace $old $ver -- $KERNEL_DIR/flash_zip/META-INF/com/google/android/updater-script
 case $ch in
   1) echo -e "$cyan     ~~~~~~~~~~Dirty~~~~~~~~~~ $nocol"
      echo -e "$cyan     ~~~~~~~~~~Building now~~~~~~~~~~ $nocol"

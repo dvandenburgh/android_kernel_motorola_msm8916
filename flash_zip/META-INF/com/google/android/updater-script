@@ -1,4 +1,4 @@
-ui_print("FireKernel for Motorola G3");
+ui_print("FireKernel for Motorola G3 v6.1");
 
 assert(getprop("ro.product.device") == "surnia" ||
        getprop("ro.product.device") == "surnia_umts" ||
