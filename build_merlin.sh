@@ -43,7 +43,7 @@ compile_kernel ()
   echo -e "$cyan***********************************************"
   echo -e "          Initializing defconfig          "
   echo -e "***********************************************$nocol"
-  make osprey_defconfig
+  make merlin_defconfig
   echo -e "$cyan***********************************************"
   echo -e "             Building kernel          "
   echo -e "***********************************************$nocol"
@@ -84,7 +84,7 @@ fire_kernel ()
   echo -n " Which android mm or n : ? "
   read anv
 
-replace $old $ver -- $KERNEL_DIR/arch/arm/configs/osprey_defconfig
+replace $old $ver -- $KERNEL_DIR/arch/arm/configs/merlin_defconfig
 replace $old $ver -- $KERNEL_DIR/flash_zip/META-INF/com/google/android/updater-script
 case $ch in
   1) echo -e "$cyan***********************************************"
@@ -109,11 +109,11 @@ mkdir -p flash_zip/system/lib/modules/
 find firekernel_install/ -name '*.ko' -type f -exec cp '{}' flash_zip/system/lib/modules/ \;
 cp arch/arm/boot/zImage flash_zip/tools/
 cp arch/arm/boot/dt.img flash_zip/tools/
-rm -f ~/android/kernel/upload/osprey/*
+rm -f ~/android/kernel/upload/merlin/*
 cd flash_zip
 zip -r ../arch/arm/boot/fire_kernel.zip ./
 today=$(date +"-%d%m%Y")
-mv ~/android/kernel/motorola/msm8916/arch/arm/boot/fire_kernel.zip ~/android/kernel/upload/osprey/FireKernel-$anv-$dev-v$ver$today.zip
+mv ~/android/kernel/motorola/msm8916/arch/arm/boot/fire_kernel.zip ~/android/kernel/upload/merlin/FireKernel-$anv-$dev-v$ver$today.zip
 }
 
 fire_kernel
