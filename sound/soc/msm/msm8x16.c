@@ -1150,7 +1150,7 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	}
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(msm8x16_wcd_cal)->X) = (Y))
-	S(v_hs_max, 1500);
+	S(v_hs_max, 1600);
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(msm8x16_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -1168,16 +1168,16 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	 * all btn_low corresponds to threshold for current source
 	 * all bt_high corresponds to threshold for Micbias
 	 */
-	btn_low[0] = 25;
-	btn_high[0] = 25;
-	btn_low[1] = 50;
-	btn_high[1] = 50;
-	btn_low[2] = 75;
-	btn_high[2] = 75;
-	btn_low[3] = 112;
-	btn_high[3] = 112;
-	btn_low[4] = 137;
-	btn_high[4] = 137;
+	btn_low[0] = 50;
+	btn_high[0] = 50;
+	btn_low[1] = 130;
+	btn_high[1] = 130;
+	btn_low[2] = 200;
+	btn_high[2] = 200;
+	btn_low[3] = 450;
+	btn_high[3] = 450;
+	btn_low[4] = 450;
+	btn_high[4] = 450;
 
 	return msm8x16_wcd_cal;
 }
@@ -2216,7 +2216,23 @@ static int msm8x16_setup_hs_jack(struct platform_device *pdev,
 			struct msm8916_asoc_mach_data *pdata)
 {
 	struct pinctrl *pinctrl;
+#ifdef CONFIG_SND_HARPIA_HEADSET_SWH
+	int ret = 0;
 
+	pdata->headset_det_en_gpio = of_get_named_gpio(pdev->dev.of_node,
+					"qcom,cdc-headset-en-gpios", 0);
+	if (pdata->headset_det_en_gpio < 0) {
+		dev_err(&pdev->dev,
+			"property %s in node %s not found %d\n",
+			"qcom,cdc-headset-en-gpios",
+			pdev->dev.of_node->full_name,
+			pdata->headset_det_en_gpio);
+	}
+	if (gpio_is_valid(pdata->headset_det_en_gpio))
+		ret = gpio_request(pdata->headset_det_en_gpio,
+						"cdc-headset-en-gpios");
+	ret = gpio_direction_output(pdata->headset_det_en_gpio, 1);
+#endif
 	pdata->us_euro_gpio = of_get_named_gpio(pdev->dev.of_node,
 					"qcom,cdc-us-euro-gpios", 0);
 	if (pdata->us_euro_gpio < 0) {

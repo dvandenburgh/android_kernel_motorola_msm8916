@@ -3,7 +3,7 @@
  * Copyright (c) 2009	   Shrikar Archak
  * Copyright (c) 2003-2014 Stony Brook University
  * Copyright (c) 2003-2014 The Research Foundation of SUNY
- * Copyright (C) 2013-2014 Motorola Mobility, LLC
+ * Copyright (C) 2013-2014, 2016 Motorola Mobility, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -88,6 +88,16 @@ static long esdfs_unlocked_ioctl(struct file *file, unsigned int cmd,
 	const struct cred *creds = esdfs_override_creds(sbi, NULL);
 	if (!creds)
 		return -ENOMEM;
+
+	if (cmd == ESDFS_IOC_DIS_ACCESS) {
+		if (!capable(CAP_SYS_ADMIN)) {
+			err = -EPERM;
+			goto out;
+		}
+		set_opt(sbi, ACCESS_DISABLE);
+		err = 0;
+		goto out;
+	}
 
 	lower_file = esdfs_lower_file(file);
 
@@ -189,6 +199,9 @@ static int esdfs_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!ESDFS_F(file)->lower_vm_ops) /* save for our ->fault */
 		ESDFS_F(file)->lower_vm_ops = saved_vm_ops;
 
+	vma->vm_private_data = file;
+	get_file(lower_file);
+	vma->vm_file = lower_file;
 out:
 	esdfs_revert_creds(creds, NULL);
 	return err;
@@ -199,10 +212,16 @@ static int esdfs_open(struct inode *inode, struct file *file)
 	int err = 0;
 	struct file *lower_file = NULL;
 	struct path lower_path;
+	struct esdfs_sb_info *sbi = ESDFS_SB(inode->i_sb);
 	const struct cred *creds =
 			esdfs_override_creds(ESDFS_SB(inode->i_sb), NULL);
 	if (!creds)
 		return -ENOMEM;
+
+	if (test_opt(sbi, ACCESS_DISABLE)) {
+		esdfs_revert_creds(creds, NULL);
+		return -ENOENT;
+	}
 
 	/* don't open unhashed/deleted files */
 	if (d_unhashed(file->f_path.dentry)) {

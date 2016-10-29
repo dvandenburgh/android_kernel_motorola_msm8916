@@ -29,13 +29,59 @@ struct panel_id {
 #define MDSS_DSI_RST_SEQ_LEN	10
 #define MDSS_MDP_MAX_FETCH 12
 
+#define BRIGHTNESS_HBM_ON	0xFFFFFFFE
+#define BRIGHTNESS_HBM_OFF	(BRIGHTNESS_HBM_ON - 1)
+#define HBM_BRIGHTNESS(value) ((value) == HBM_ON_STATE ?\
+			BRIGHTNESS_HBM_ON : BRIGHTNESS_HBM_OFF)
+/* HBM implementation is different, depending on display and backlight hardware
+ * design, which is classified into the following types:
+ * HBM_TYPE_OLED: OLED panel, HBM is controlled by DSI register only, which
+ *     is independent on brightness.
+ * HBM_TYPE_LCD_DCS_WLED: LCD panel, HBM is controlled by DSI register, and
+ *     brightness is decided by WLED IC on I2C/SPI bus.
+ * HBM_TYPE_LCD_DCS_ONLY: LCD panel, brightness/HBM is controlled by DSI
+ *     register only.
+ * HBM_TYPE_LCD_WLED_ONLY: LCD panel, brightness/HBM is controlled by WLED
+ *     IC only.
+ *
+ * Note: brightness must be at maximum while enabling HBM for all LCD panels
+ */
+#define HBM_TYPE_OLED	0
+#define HBM_TYPE_LCD_DCS_WLED	1
+#define HBM_TYPE_LCD_DCS_ONLY	2
+#define HBM_TYPE_LCD_WLED_ONLY	3
+
+enum hbm_state {
+	HBM_OFF_STATE = 0,
+	HBM_ON_STATE,
+	HBM_STATE_NUM
+};
+
 enum cabc_mode {
 	CABC_UI_MODE = 0,
-	CABC_ST_MODE,
 	CABC_MV_MODE,
 	CABC_DIS_MODE,
-	CABC_OFF_MODE,
-	CABC_MODE_MAX_NUM
+	CABC_MODE_NUM
+};
+
+enum panel_param_id {
+	PARAM_HBM_ID = 0,
+	PARAM_CABC_ID,
+	PARAM_ID_NUM
+};
+
+struct panel_param_val_map {
+	char *name;
+	char *prop;
+};
+
+struct panel_param {
+	const char *param_name;
+	const struct panel_param_val_map *val_map;
+	const u16 val_max;
+	const u16 default_value;
+	u16 value;
+	bool is_supported;
 };
 
 /* panel type list */
@@ -190,8 +236,6 @@ struct mdss_intf_recovery {
  *					case there was any errors detected.
  * @MDSS_EVENT_INTF_RESTORE: Event to restore the interface in case there
  *				was any errors detected during normal operation.
- * @MDSS_EVENT_SET_CABC: Set CABC mode, for Motorola "Dynamic CABC" feature.
- * @MDSS_EVENT_ENABLE_HBM: Enable Motorola High Brightness Mode feature.
  */
 enum mdss_intf_events {
 	MDSS_EVENT_RESET = 1,
@@ -216,8 +260,6 @@ enum mdss_intf_events {
 	MDSS_EVENT_REGISTER_RECOVERY_HANDLER,
 	MDSS_EVENT_ENABLE_TE,
 	MDSS_EVENT_INTF_RESTORE,
-	MDSS_EVENT_SET_CABC,
-	MDSS_EVENT_ENABLE_HBM,
 };
 
 struct lcd_panel_info {
@@ -396,6 +438,7 @@ struct mdss_panel_info {
 	bool ulps_suspend_enabled;
 	bool panel_ack_disabled;
 	bool esd_check_enabled;
+	bool bklt_dcs_12bits_enabled;
 	char dfps_update;
 	int new_fps;
 	int panel_max_fps;
@@ -442,16 +485,19 @@ struct mdss_panel_info {
 	struct lvds_panel_info lvds;
 	struct edp_panel_info edp;
 
-	bool dynamic_cabc_enabled;
-	enum cabc_mode cabc_mode;
-	bool hbm_feature_enabled;
-	bool hbm_state;
 	bool blank_progress_notify_enabled;
+	struct panel_param *param[PARAM_ID_NUM];
+	bool hbm_restore;
+	u32 hbm_type;
+	u32 bl_hbm_off;
+	u32 bl_hbm_on_max;
+	u32 bl_hbm_off_max;
 };
 
 struct mdss_panel_data {
 	struct mdss_panel_info panel_info;
 	void (*set_backlight) (struct mdss_panel_data *pdata, u32 bl_level);
+	int (*set_param)(struct mdss_panel_data *pdata, u16 id, u16 value);
 	unsigned char *mmss_cc_base;
 
 	/**
@@ -650,18 +696,24 @@ int mdss_panel_get_boot_cfg(void);
  */
 bool mdss_is_ready(void);
 
-/**
- * mdss_panel_map_cabc_name() - get panel CABC mode name
- *
- * returns name if mapping succeeds, else returns NULL.
- */
-static const char *cabc_mode_names[CABC_MODE_MAX_NUM] = {
-	"UI", "ST", "MV", "DIS", "OFF"
-};
-static inline const char *mdss_panel_map_cabc_name(int mode)
+static inline bool mdss_panel_param_is_supported(struct mdss_panel_info *p,
+	u16 id)
 {
-	if (mode >= CABC_UI_MODE && mode < CABC_MODE_MAX_NUM)
-		return cabc_mode_names[mode];
-	return NULL;
-}
+	if (id < PARAM_ID_NUM && p && p->param[id] &&
+		p->param[id]->is_supported)
+		return true;
+
+	return false;
+};
+
+static inline bool mdss_panel_param_is_hbm_on(struct mdss_panel_info *p)
+{
+	u16 id = PARAM_HBM_ID;
+
+	if (mdss_panel_param_is_supported(p, id) &&
+		p->param[id]->value == HBM_ON_STATE)
+		return true;
+
+	return false;
+};
 #endif /* MDSS_PANEL_H */

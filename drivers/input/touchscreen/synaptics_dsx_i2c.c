@@ -50,6 +50,10 @@
 #define INPUT_PHYS_NAME "synaptics_dsx_i2c/input0"
 #define TYPE_B_PROTOCOL
 
+#define IRQ_DISPATCH_LATENCY	5000
+
+static int latency_in_effect = IRQ_DISPATCH_LATENCY;
+
 #define RMI4_WAIT_READY 0
 #define RMI4_HW_RESET 1
 #define RMI4_SW_RESET 2
@@ -1404,6 +1408,12 @@ static ssize_t synaptics_rmi4_drv_irq_show(struct device *dev,
 static ssize_t synaptics_rmi4_drv_irq_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count);
 
+static ssize_t synaptics_rmi4_pm_opt_show(struct device *dev,
+		struct device_attribute *attr, char *buf);
+
+static ssize_t synaptics_rmi4_pm_opt_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count);
+
 static ssize_t synaptics_rmi4_hw_irqstat_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
 
@@ -1592,6 +1602,9 @@ static struct device_attribute attrs[] = {
 	__ATTR(tsi, S_IRUSR | S_IRGRP,
 			synaptics_rmi4_ud_show,
 			synaptics_rmi4_store_error),
+	__ATTR(pm_opt, (S_IRUSR | S_IRGRP | S_IWUSR | S_IWGRP),
+			synaptics_rmi4_pm_opt_show,
+			synaptics_rmi4_pm_opt_store),
 };
 
 struct synaptics_exp_fn_ctrl {
@@ -2062,6 +2075,36 @@ static void synaptics_dsx_sensor_state(struct synaptics_rmi4_data *rmi4_data,
 		if (!rmi4_data->in_bootloader)
 			rmi4_data->in_bootloader = true;
 	case STATE_INIT:
+		synaptics_rmi4_irq_enable(rmi4_data, false);
+
+		if (!rmi4_data->in_bootloader) {
+			int retval;
+			unsigned char mode = 1;
+			unsigned char intr_status[MAX_INTR_REGISTERS];
+
+			/* deactivate touch by putting touch IC into */
+			/* sleep mode to prevent interference of touch */
+			/* processing with flashing */
+			pr_debug("enter sleep mode\n");
+			retval = synaptics_rmi4_i2c_write(rmi4_data,
+					rmi4_data->f01_ctrl_base_addr,
+					&mode,
+					sizeof(mode));
+
+			if (retval < 0)
+				pr_notice("failed to enter sleep mode\n");
+
+			/* clear unhandled interrupt if any */
+			pr_debug("clear interrupt\n");
+			retval = synaptics_rmi4_i2c_read(rmi4_data,
+					rmi4_data->f01_data_base_addr + 1,
+					&intr_status[0],
+					rmi4_data->num_of_intr_regs);
+
+			if (retval < 0)
+				pr_notice("failed to clear interrupt\n");
+		}
+
 		/* de-allocate input device earlier to allow */
 		/* EventHub become notified of input removal */
 		if (rmi4_data->input_registered) {
@@ -2072,8 +2115,7 @@ static void synaptics_dsx_sensor_state(struct synaptics_rmi4_data *rmi4_data,
 			pr_debug("de-allocated input device\n");
 		}
 
-		synaptics_rmi4_irq_enable(rmi4_data, false);
-			break;
+		break;
 	}
 
 	pr_info("state change %s -> %s\n",
@@ -2421,6 +2463,38 @@ static ssize_t synaptics_rmi4_drv_irq_store(struct device *dev,
 	case 1:
 		/* Enable irq */
 		synaptics_rmi4_irq_enable(rmi4_data, true);
+		break;
+	default:
+		pr_err("Invalid value\n");
+		return -EINVAL;
+	}
+	return count;
+}
+
+static ssize_t synaptics_rmi4_pm_opt_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", latency_in_effect);
+}
+
+static ssize_t synaptics_rmi4_pm_opt_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long value = 0;
+	int err = 0;
+
+	err = kstrtoul(buf, 10, &value);
+	if (err < 0) {
+		pr_err("Failed to convert value\n");
+		return -EINVAL;
+	}
+
+	switch (value) {
+	case 0:
+		latency_in_effect = PM_QOS_DEFAULT_VALUE;
+		break;
+	case 1:
+		latency_in_effect = IRQ_DISPATCH_LATENCY;
 		break;
 	default:
 		pr_err("Invalid value\n");
@@ -5244,10 +5318,21 @@ static ssize_t path_show(struct device *dev,
 	return blen;
 }
 
+/* Attribute: vendor (RO) */
+static ssize_t vendor_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "synaptics");
+}
+
 static struct device_attribute touchscreen_attributes[] = {
 	__ATTR_RO(path),
+	__ATTR_RO(vendor),
 	__ATTR_NULL
 };
+
+#define TSDEV_MINOR_BASE 128
+#define TSDEV_MINOR_MAX 32
 
 static int synaptics_dsx_sysfs_touchscreen(
 	struct synaptics_rmi4_data *rmi4_data, bool create)
@@ -5257,8 +5342,16 @@ static int synaptics_dsx_sysfs_touchscreen(
 	int i, error = 0;
 	static struct class *touchscreen_class;
 	static struct device *ts_class_dev;
+	static int minor;
 
 	if (create) {
+		minor = input_get_new_minor(rmi4_data->i2c_client->addr,
+						1, false);
+		if (minor < 0)
+			minor = input_get_new_minor(TSDEV_MINOR_BASE,
+					TSDEV_MINOR_MAX, true);
+		pr_info("assigned minor %d\n", minor);
+
 		touchscreen_class = class_create(THIS_MODULE, "touchscreen");
 		if (IS_ERR(touchscreen_class)) {
 			error = PTR_ERR(touchscreen_class);
@@ -5267,7 +5360,7 @@ static int synaptics_dsx_sysfs_touchscreen(
 		}
 
 		ts_class_dev = device_create(touchscreen_class, NULL,
-				MKDEV(INPUT_MAJOR, rmi4_data->i2c_client->addr),
+				MKDEV(INPUT_MAJOR, minor),
 				rmi4_data, rmi->product_id_string);
 		if (IS_ERR(ts_class_dev)) {
 			error = PTR_ERR(ts_class_dev);
@@ -5299,8 +5392,7 @@ static int synaptics_dsx_sysfs_touchscreen(
 device_destroy:
 	for (--i; i >= 0; --i)
 		device_remove_file(ts_class_dev, &attrs[i]);
-	device_destroy(touchscreen_class,
-			MKDEV(INPUT_MAJOR, rmi4_data->i2c_client->addr));
+	device_destroy(touchscreen_class, MKDEV(INPUT_MAJOR, minor));
 	ts_class_dev = NULL;
 	class_unregister(touchscreen_class);
 	pr_err("error creating touchscreen class\n");
@@ -5599,6 +5691,10 @@ static int synaptics_rmi4_probe(struct i2c_client *client,
 	if (rmi4_data->charger_detection)
 		ps_notifier_register(rmi4_data);
 
+	rmi4_data->pm_qos_irq.type = PM_QOS_REQ_AFFINE_IRQ;
+	rmi4_data->pm_qos_irq.irq = rmi4_data->irq;
+	pm_qos_add_request(&rmi4_data->pm_qos_irq, PM_QOS_CPU_DMA_LATENCY,
+			latency_in_effect);
 	return retval;
 
 err_sysfs:
@@ -5705,6 +5801,9 @@ static int synaptics_rmi4_remove(struct i2c_client *client)
 	synaptics_dsx_free_modes(rmi4_data);
 	if (rmi4_data->charger_detection)
 		ps_notifier_unregister(rmi4_data);
+
+	pm_qos_remove_request(&rmi4_data->pm_qos_irq);
+
 	kfree(rmi4_data);
 
 	return 0;
@@ -5941,6 +6040,8 @@ static int synaptics_rmi4_suspend(struct device *dev)
 		rmi4_data->ic_on = false;
 	}
 
+	pm_qos_update_request(&rmi4_data->pm_qos_irq, PM_QOS_DEFAULT_VALUE);
+
 	return 0;
 }
 
@@ -5966,6 +6067,9 @@ static int synaptics_rmi4_resume(struct device *dev)
 
 	if (atomic_cmpxchg(&rmi4_data->touch_stopped, 1, 0) == 0)
 		return 0;
+
+	pm_qos_update_request(&rmi4_data->pm_qos_irq, latency_in_effect);
+	pr_debug("set pm_qos latency %d\n", latency_in_effect);
 
 	synaptics_dsx_resumeinfo_start(rmi4_data);
 

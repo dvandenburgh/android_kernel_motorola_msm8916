@@ -223,8 +223,13 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 
 static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
 static struct dsi_cmd_desc backlight_cmd = {
-	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0, sizeof(led_pwm1)},
 	led_pwm1
+};
+static char led_pwm2[3] = {0x51, 0x0, 0x0};	/* DTYPE_DCS_LWRITE */
+static struct dsi_cmd_desc backlight_12bits_cmd = {
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(led_pwm2)},
+	led_pwm2
 };
 
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
@@ -240,16 +245,116 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 
 	pr_debug("%s: level=%d\n", __func__, level);
 
-	led_pwm1[1] = (unsigned char)level;
+	if (!pinfo->bklt_dcs_12bits_enabled)
+		led_pwm1[1] = (unsigned char)level;
+	else {
+		led_pwm2[1] = (unsigned char)((level&0xF00)>>8);
+		led_pwm2[2] = (unsigned char)(level&0xFF);
+	}
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
-	cmdreq.cmds = &backlight_cmd;
+	if (!pinfo->bklt_dcs_12bits_enabled)
+		cmdreq.cmds = &backlight_cmd;
+	else
+		cmdreq.cmds = &backlight_12bits_cmd;
 	cmdreq.cmds_cnt = 1;
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+}
+
+/*
+ * Note that: the following panel parameter related function must be called
+ * within mfd->panel_info->param_lock to avoid data mess-up caused by possible
+ * race condition between blank/unblank and parameter access.
+ */
+static int mdss_dsi_panel_set_param(struct mdss_panel_data *pdata,
+		u16 id, u16 val)
+{
+	struct mdss_panel_info *pinfo = &pdata->panel_info;
+	struct dsi_panel_cmds *cmds;
+	struct mdss_dsi_ctrl_pdata *ctrl;
+
+	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata, panel_data);
+	if (!ctrl) {
+		pr_err("%s: ctrl is null\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!mdss_panel_param_is_supported(pinfo, id)) {
+		pr_debug("%s: id %d is disabled, ignore request\n",
+			__func__, id);
+		return 0;
+	}
+
+	cmds = ctrl->param_cmds[id];
+	if (!cmds || !cmds[val].cmd_cnt) {
+		pr_warn("%s: value %d not supported for id %d\n",
+				__func__, val, id);
+		return -EINVAL;
+	}
+	mdss_dsi_panel_cmds_send(ctrl, &cmds[val]);
+	return 0;
+}
+
+static u32 mdss_dsi_panel_bl_scale_ctrl(u32 bl_level,
+	u32 bl_scaled_max, u32 bl_max)
+{
+	if (bl_level) {
+		bl_level = bl_level * bl_scaled_max / bl_max;
+		bl_level = (bl_level < 1) ? 1 : bl_level;
+	}
+	return bl_level;
+}
+
+static bool mdss_dsi_panel_hbm_bl_ctrl(struct mdss_panel_data *pdata,
+							u32 *level)
+{
+	u32 bl_level;
+
+	if (pdata == NULL || level == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return false;
+	}
+
+	if (!mdss_panel_param_is_supported(&pdata->panel_info, PARAM_HBM_ID))
+		return false;
+
+	bl_level = *level;
+	if (bl_level == BRIGHTNESS_HBM_ON || bl_level == BRIGHTNESS_HBM_OFF) {
+		if (pdata->panel_info.hbm_type == HBM_TYPE_OLED)
+			return true;
+		if (pdata->panel_info.hbm_type == HBM_TYPE_LCD_DCS_ONLY) {
+			*level = bl_level == BRIGHTNESS_HBM_ON ?
+				pdata->panel_info.bl_hbm_on_max :
+				mdss_dsi_panel_bl_scale_ctrl(
+					pdata->panel_info.bl_hbm_off,
+					pdata->panel_info.bl_hbm_off_max,
+					pdata->panel_info.bl_max);
+		} else {
+			*level = bl_level == BRIGHTNESS_HBM_ON ?
+				pdata->panel_info.bl_max :
+				pdata->panel_info.bl_hbm_off;
+		}
+		return false;
+	}
+
+	if (pdata->panel_info.hbm_type != HBM_TYPE_OLED) {
+		pdata->panel_info.bl_hbm_off = bl_level;
+		if (mdss_panel_param_is_hbm_on(&pdata->panel_info)) {
+			pr_debug("%s: Ignore setting brightness %d in LCD HBM mode\n",
+				__func__, bl_level);
+			return true;
+		}
+		if (pdata->panel_info.hbm_type == HBM_TYPE_LCD_DCS_ONLY)
+			*level = mdss_dsi_panel_bl_scale_ctrl(bl_level,
+				pdata->panel_info.bl_hbm_off_max,
+				pdata->panel_info.bl_max);
+	}
+
+	return false;
 }
 
 static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
@@ -666,6 +771,9 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+	if (mdss_dsi_panel_hbm_bl_ctrl(pdata, &bl_level))
+		return;
+
 	/*
 	 * Some backlight controllers specify a minimum duty cycle
 	 * for the backlight brightness. If the brightness is less
@@ -805,10 +913,6 @@ end:
 	} else
 		dropbox_count = 0;
 
-	/* Default CABC mode is UI while turning on display */
-	if (pdata->panel_info.dynamic_cabc_enabled)
-		pdata->panel_info.cabc_mode = CABC_UI_MODE;
-
 	pr_info("%s-. Pwr_mode(0x0A) = 0x%x\n", __func__, pwr_mode);
 	return 0;
 }
@@ -854,9 +958,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	if (ctrl->panel_config.bare_board == true)
 		goto end;
 
-	if (ctrl->set_hbm)
-		ctrl->set_hbm(ctrl, 0);
-
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
@@ -864,10 +965,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_BLANK;
-
-	if (pdata->panel_info.dynamic_cabc_enabled)
-		pdata->panel_info.cabc_mode = CABC_OFF_MODE;
-
 	pr_info("%s-:\n", __func__);
 	return 0;
 }
@@ -1006,6 +1103,11 @@ static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
 		dchdr = (struct dsi_ctrl_hdr *)bp;
 		len -= sizeof(*dchdr);
 		bp += sizeof(*dchdr);
+		if ((dchdr->wait != 0 || i == (cnt - 1)) && dchdr->last == 0) {
+			pr_warn("%s: correct \"last\" flag of DSI cmd 0x%02X of %s\n",
+				__func__, *bp, cmd_key);
+			dchdr->last = 1;
+		}
 		pcmds->cmds[i].dchdr = *dchdr;
 		pcmds->cmds[i].payload = bp;
 		bp += dchdr->dlen;
@@ -1033,6 +1135,121 @@ exit_free:
 	return -ENOMEM;
 }
 
+static struct panel_param_val_map hbm_map[HBM_STATE_NUM] = {
+	{"0", "qcom,mdss-dsi-hbm-off-command"},
+	{"1", "qcom,mdss-dsi-hbm-on-command"},
+};
+
+static struct panel_param_val_map cabc_map[CABC_MODE_NUM] = {
+	{"UI", "qcom,mdss-dsi-cabc-ui-command"},
+	{"MV", "qcom,mdss-dsi-cabc-mv-command"},
+	{"DIS", "qcom,mdss-dsi-cabc-dis-command"},
+};
+
+static struct panel_param mdss_dsi_panel_param[PARAM_ID_NUM] = {
+	{"HBM", hbm_map, HBM_STATE_NUM, HBM_OFF_STATE, HBM_OFF_STATE, false},
+	{"CABC", cabc_map, CABC_MODE_NUM, CABC_UI_MODE, CABC_UI_MODE, false},
+};
+
+static int mdss_panel_parse_param_prop(struct device_node *np,
+				struct mdss_panel_info *pinfo,
+				struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	int i, j, cmd_num, rc = 0;
+	struct panel_param *param;
+	struct dsi_panel_cmds *cmds;
+	char *prop;
+	const char *data;
+	u32 tmp;
+
+	pinfo->hbm_restore = false;
+
+	for (i = 0; i < ARRAY_SIZE(mdss_dsi_panel_param); i++) {
+		param = &mdss_dsi_panel_param[i];
+
+		if (i == PARAM_HBM_ID) {
+			pinfo->bl_hbm_off = pinfo->bl_max;
+			data = of_get_property(np,
+				"qcom,mdss-dsi-hbm-type", NULL);
+
+			if (data && !strcmp(data, "lcd-dcs-wled"))
+				pinfo->hbm_type = HBM_TYPE_LCD_DCS_WLED;
+			else if (data && !strcmp(data, "lcd-dcs-only"))
+				pinfo->hbm_type = HBM_TYPE_LCD_DCS_ONLY;
+			else if (data && !strcmp(data, "lcd-wled-only"))
+				pinfo->hbm_type = HBM_TYPE_LCD_WLED_ONLY;
+			else
+				pinfo->hbm_type = HBM_TYPE_OLED;
+
+			if (pinfo->hbm_type == HBM_TYPE_LCD_DCS_ONLY) {
+				rc = of_property_read_u32(np,
+					"qcom,mdss-dsi-bl-hbm-on-max", &tmp);
+				pinfo->bl_hbm_on_max = (!rc ? tmp : 0);
+				rc |= of_property_read_u32(np,
+					"qcom,mdss-dsi-bl-hbm-off-max", &tmp);
+				pinfo->bl_hbm_off_max = (!rc ? tmp : 0);
+
+				if (!rc) {
+					param->is_supported = true;
+					pinfo->param[i] = param;
+					pr_info("%s: %s feature enabled with 2 dt props\n",
+						__func__, param->param_name);
+					pr_info("%s: HBM type = %d\n",
+						__func__, pinfo->hbm_type);
+				}
+				continue;
+			}
+		}
+
+		cmds = kcalloc(param->val_max, sizeof(struct dsi_panel_cmds),
+				GFP_KERNEL);
+		if (cmds == NULL) {
+			rc = -ENOMEM;
+			goto err;
+		}
+		ctrl->param_cmds[i] = cmds;
+		cmd_num = 0;
+
+		for (j = 0; j < param->val_max; j++) {
+			prop = param->val_map[j].prop;
+			if (!prop || !of_get_property(np, prop, NULL))
+				continue;
+			rc = mdss_dsi_parse_dcs_cmds(np,
+					&cmds[j], prop, NULL);
+			if (rc) {
+				pr_err("%s: failed to read prop %s\n",
+					__func__, prop);
+				goto err;
+			}
+			if (cmds[j].cmd_cnt)
+				cmd_num++;
+		}
+
+		if (cmd_num == 0) {
+			kfree(ctrl->param_cmds[i]);
+			ctrl->param_cmds[i] = NULL;
+			continue;
+		}
+
+		param->is_supported = true;
+		pinfo->param[i] = param;
+		pr_info("%s: %s feature enabled with %d dt cmds\n",
+				__func__, param->param_name, cmd_num);
+		if (i == PARAM_HBM_ID)
+			pr_info("%s: HBM type = %d\n",
+				__func__, pinfo->hbm_type);
+	}
+
+	return rc;
+err:
+	for (i = 0; i < ARRAY_SIZE(mdss_dsi_panel_param); i++) {
+		kfree(ctrl->param_cmds[i]);
+		ctrl->param_cmds[i] = NULL;
+		pinfo->param[i] = NULL;
+		mdss_dsi_panel_param[i].is_supported = false;
+	}
+	return rc;
+}
 
 int mdss_panel_get_dst_fmt(u32 bpp, char mipi_mode, u32 pixel_packing,
 				char *dst_format)
@@ -1520,144 +1737,6 @@ static void mdss_dsi_parse_dfps_config(struct device_node *pan_node,
 	return;
 }
 
-int mdss_dsi_panel_set_cabc(struct mdss_dsi_ctrl_pdata *ctrl, int mode)
-{
-	int rc = -EINVAL;
-	const char *name;
-	struct mdss_panel_info *pinfo;
-	struct dsi_panel_cmds *cmds = NULL;
-
-	if (!ctrl) {
-		pr_err("%s: Invalid ctrl pointer.\n", __func__);
-		goto end;
-	}
-
-	pinfo = &ctrl->panel_data.panel_info;
-	name = mdss_panel_map_cabc_name(mode);
-	if (!name) {
-		pr_err("%s: Invalid mode: %d\n", __func__, mode);
-		goto end;
-	}
-
-	if (pinfo->cabc_mode == mode) {
-		pr_warn("%s: Already in requested mode: %s\n", __func__, name);
-		rc = 0;
-		goto end;
-	}
-
-	if (mode == CABC_MV_MODE && ctrl->cabc_mv_cmds.cmd_cnt)
-		cmds = &ctrl->cabc_mv_cmds;
-	else if (mode == CABC_UI_MODE && ctrl->cabc_ui_cmds.cmd_cnt)
-		cmds = &ctrl->cabc_ui_cmds;
-	else if (mode == CABC_DIS_MODE && ctrl->cabc_dis_cmds.cmd_cnt)
-		cmds = &ctrl->cabc_dis_cmds;
-
-	if (!cmds) {
-		pr_warn("%s: %s mode not supported.\n", __func__, name);
-		goto end;
-	}
-
-	mutex_lock(&ctrl->mutex);
-	if (mdss_panel_is_power_off(pinfo->panel_power_state)) {
-		pr_err("%s: Panel is off\n", __func__);
-		rc = -EPERM;
-		mutex_unlock(&ctrl->mutex);
-		goto end;
-	}
-	mdss_dsi_panel_cmds_send(ctrl, cmds);
-	mutex_unlock(&ctrl->mutex);
-
-	pr_info("%s: Done setting %s mode\n", __func__, name);
-	pinfo->cabc_mode = mode;
-	rc = 0;
-end:
-	return rc;
-}
-
-static int mdss_dsi_parse_optional_dcs_cmds(struct device_node *np,
-		struct dsi_panel_cmds *pcmds, char *cmd_key, char *link_key)
-{
-	int rc;
-
-	if (!of_get_property(np, cmd_key, NULL))
-		return 0;
-
-	rc = mdss_dsi_parse_dcs_cmds(np, pcmds, cmd_key, link_key);
-	if (rc)
-		pr_err("%s : Failed parsing %s commands, rc = %d\n",
-			__func__, cmd_key, rc);
-	return rc;
-}
-
-static int mdss_panel_parse_optional_prop(struct device_node *np,
-				struct mdss_panel_info *pinfo,
-				struct mdss_dsi_ctrl_pdata *ctrl)
-{
-	int rc = 0;
-
-	/* Dynamic CABC properties */
-	pinfo->dynamic_cabc_enabled = false;
-	rc = mdss_dsi_parse_optional_dcs_cmds(np, &ctrl->cabc_ui_cmds,
-				"qcom,mdss-dsi-cabc-ui-command", NULL);
-	rc |= mdss_dsi_parse_optional_dcs_cmds(np, &ctrl->cabc_mv_cmds,
-				"qcom,mdss-dsi-cabc-mv-command", NULL);
-	rc |= mdss_dsi_parse_optional_dcs_cmds(np, &ctrl->cabc_dis_cmds,
-				"qcom,mdss-dsi-cabc-dis-command", NULL);
-	if (ctrl->cabc_ui_cmds.cmd_cnt && ctrl->cabc_mv_cmds.cmd_cnt) {
-		pinfo->dynamic_cabc_enabled = true;
-		pinfo->cabc_mode = CABC_UI_MODE;
-		pr_info("%s: Dynamic CABC enabled.\n", __func__);
-	}
-
-	/* Pre-on command property */
-	rc |= mdss_dsi_parse_optional_dcs_cmds(np, &ctrl->pre_on_cmds,
-		"qcom,mdss-dsi-pre-on-command",
-		"qcom,mdss-dsi-pre-on-command-state");
-	if (ctrl->pre_on_cmds.cmd_cnt)
-		pr_info("%s: pre-on commands configured.\n", __func__);
-
-	/* HBM properties */
-	rc |= mdss_dsi_parse_optional_dcs_cmds(np, &ctrl->hbm_on_cmds,
-				"qcom,mdss-dsi-hbm-on-command", NULL);
-	rc |= mdss_dsi_parse_optional_dcs_cmds(np, &ctrl->hbm_off_cmds,
-				"qcom,mdss-dsi-hbm-off-command", NULL);
-	if (ctrl->hbm_on_cmds.cmd_cnt && ctrl->hbm_off_cmds.cmd_cnt) {
-		pinfo->hbm_feature_enabled = true;
-		pinfo->hbm_state = 0;
-		pr_info("%s: HBM enabled.\n", __func__);
-	}
-
-	return rc;
-}
-
-int mdss_dsi_panel_set_hbm(struct mdss_dsi_ctrl_pdata *ctrl, int state)
-{
-	struct mdss_panel_info *pinfo;
-
-	if (!ctrl) {
-		pr_err("%s: Invalid ctrl pointer.\n", __func__);
-		return -EINVAL;
-	}
-	pinfo = &ctrl->panel_data.panel_info;
-
-	if (!pinfo->hbm_feature_enabled) {
-		pr_err("%s: HBM is disabled, ignore request\n", __func__);
-		return -EPERM;
-	}
-
-	if (pinfo->hbm_state == state) {
-		pr_debug("%s: already in state %d\n", __func__, state);
-		return 0;
-	}
-
-	mdss_dsi_panel_cmds_send(ctrl,
-			state ? &ctrl->hbm_on_cmds : &ctrl->hbm_off_cmds);
-	pinfo->hbm_state = state;
-	pr_info("%s: Done setting state %d\n", __func__, state);
-
-	return 0;
-}
-
 static int mdss_panel_parse_dt(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -1826,6 +1905,8 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			ctrl_pdata->bklt_ctrl = BL_DCS_CMD;
 			pr_debug("%s: Configured DCS_CMD bklt ctrl\n",
 								__func__);
+			pinfo->bklt_dcs_12bits_enabled = of_property_read_bool(np,
+				"qcom,bklt-dcs-12bits-enabled");
 		}
 	}
 	rc = of_property_read_u32(np, "qcom,mdss-brightness-max-level", &tmp);
@@ -2043,8 +2124,21 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	pinfo->blank_progress_notify_enabled = of_property_read_bool(np,
 				"qcom,mdss-dsi-use-blank-in-progress-notifier");
 
-	if (mdss_panel_parse_optional_prop(np, pinfo, ctrl_pdata))
-		pr_err("Error parsing optional properties\n");
+	if (of_get_property(np, "qcom,mdss-dsi-pre-on-command", NULL)) {
+		rc = mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->pre_on_cmds,
+			"qcom,mdss-dsi-pre-on-command",
+			"qcom,mdss-dsi-pre-on-command-state");
+		if (rc) {
+			pr_err("%s : Failed parsing pre-on commands, rc = %d\n",
+				__func__, rc);
+			goto error;
+		}
+		if (ctrl_pdata->pre_on_cmds.cmd_cnt)
+			pr_info("%s: pre-on commands configured.\n", __func__);
+	}
+
+	if (mdss_panel_parse_param_prop(np, pinfo, ctrl_pdata))
+		pr_err("Error parsing panel parameter properties\n");
 
 	return 0;
 
@@ -2266,8 +2360,7 @@ int mdss_dsi_panel_init(struct device *dev,
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
 	ctrl_pdata->bl_on_defer = mdss_dsi_panel_bl_on_defer_start;
-	ctrl_pdata->set_cabc = mdss_dsi_panel_set_cabc;
-	ctrl_pdata->set_hbm = mdss_dsi_panel_set_hbm;
+	ctrl_pdata->panel_data.set_param = mdss_dsi_panel_set_param;
 
 	return 0;
 }

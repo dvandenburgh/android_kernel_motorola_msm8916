@@ -2207,80 +2207,6 @@ static ssize_t dynamic_fps_sysfs_wta_dfps(struct device *dev,
 	return count;
 } /* dynamic_fps_sysfs_wta_dfps */
 
-static ssize_t cabc_mode_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct fb_info *fbi = dev_get_drvdata(dev);
-	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
-	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
-	struct mdss_panel_info *pinfo = NULL;
-	const char *name;
-
-	if (!ctl || !ctl->panel_data) {
-		pr_err("ctl or panel_data not available\n");
-		return -ENODEV;
-	}
-	pinfo = &ctl->panel_data->panel_info;
-
-	name = mdss_panel_map_cabc_name(pinfo->cabc_mode);
-	if (!name) {
-		pr_err("failure to map cabc name\n");
-		return -EINVAL;
-	}
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", name);
-}
-
-static ssize_t cabc_mode_store(struct device *dev,
-			struct device_attribute *attr,
-			const char *buf, size_t count)
-{
-	struct fb_info *fbi = dev_get_drvdata(dev);
-	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
-	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
-	int ret = -EINVAL;
-	int i, mode = -1;
-	const char *name;
-
-	if (!ctl) {
-		pr_err("ctl not available\n");
-		goto end;
-	}
-
-	for (i = CABC_UI_MODE; i < CABC_MODE_MAX_NUM; i++) {
-		name = mdss_panel_map_cabc_name(i);
-		if (!name || strncmp(name, buf, strlen(name)))
-			continue;
-		mode = i;
-		break;
-	}
-
-	if (mode == -1) {
-		pr_err("invalid mode value = %s\n", buf);
-		goto end;
-	}
-
-	mutex_lock(&ctl->offlock);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
-	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_SET_CABC,
-					(void *)(unsigned long)mode);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
-	mutex_unlock(&ctl->offlock);
-end:
-	return ret ? ret : count;
-}
-
-static DEVICE_ATTR(cabc_mode, S_IWUSR | S_IWGRP | S_IRUSR | S_IRGRP,
-	cabc_mode_show, cabc_mode_store);
-
-static struct attribute *cabc_mode_attrs[] = {
-	&dev_attr_cabc_mode.attr,
-	NULL,
-};
-
-static struct attribute_group cabc_mode_attrs_group = {
-	.attrs = cabc_mode_attrs,
-};
 
 static DEVICE_ATTR(dynamic_fps, S_IRUGO | S_IWUSR, dynamic_fps_sysfs_rda_dfps,
 	dynamic_fps_sysfs_wta_dfps);
@@ -2449,84 +2375,6 @@ static struct attribute *factory_te_attrs[] = {
 };
 static struct attribute_group factory_te_attrs_group = {
 	.attrs = factory_te_attrs,
-};
-
-static ssize_t hbm_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct fb_info *fbi = dev_get_drvdata(dev);
-	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
-	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
-
-	if (!ctl) {
-		pr_warn("there is no ctl attached to fb\n");
-		return -ENODEV;
-	}
-
-	return snprintf(buf, PAGE_SIZE, "%d\n",
-			ctl->panel_data->panel_info.hbm_state);
-}
-
-static ssize_t hbm_store(struct device *dev,
-			struct device_attribute *attr,
-			const char *buf, size_t count)
-{
-	struct fb_info *fbi = dev_get_drvdata(dev);
-	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
-	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
-	int enable;
-	int r;
-
-	if (!ctl) {
-		pr_warn("there is no ctl attached to fb\n");
-		r = -ENODEV;
-		goto end;
-	}
-
-	r = kstrtoint(buf, 0, &enable);
-	if (enable > 1)
-		enable = 1;
-	if ((r) || ((enable != 0) && (enable != 1))) {
-		pr_err("invalid HBM value = %d\n",
-			enable);
-		r = -EINVAL;
-		goto end;
-	}
-
-	mutex_lock(&ctl->offlock);
-	if (!mdss_fb_is_power_on(mfd)) {
-		pr_warn("panel is not powered\n");
-		r = -EPERM;
-		goto unlock_end;
-	}
-
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
-	r = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_ENABLE_HBM,
-				(void *)(unsigned long)enable);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
-	if (r) {
-		pr_err("Failed sending HBM command, r = %d\n", r);
-		r = -EFAULT;
-		goto unlock_end;
-	}
-	pr_debug("HBM state changed by sysfs, state = %d\n", enable);
-
-unlock_end:
-	mutex_unlock(&ctl->offlock);
-end:
-	return r ? r : count;
-}
-
-static DEVICE_ATTR(sre, S_IWUSR | S_IWGRP | S_IRUSR | S_IRGRP,
-		hbm_show, hbm_store);
-
-static struct attribute *hbm_attrs[] = {
-	&dev_attr_sre.attr,
-	NULL,
-};
-
-static struct attribute_group hbm_attrs_group = {
-	.attrs = hbm_attrs,
 };
 
 static ssize_t mdss_mdp_vsync_show_event(struct device *dev,
@@ -3496,16 +3344,20 @@ static int __mdss_overlay_src_split_sort(struct msm_fb_data_type *mfd,
 		__overlay_swap_func);
 
 	for (i = 0; i < num_ovs; i++) {
+		if (ovs[i].z_order >= MDSS_MDP_MAX_STAGE) {
+			pr_err("invalid stage:%u\n", ovs[i].z_order);
+			return -EINVAL;
+		}
 		if (ovs[i].dst_rect.x < left_lm_w) {
 			if (left_lm_zo_cnt[ovs[i].z_order] == 2) {
-				pr_err("more than 2 ov @ stage%d on left lm\n",
+				pr_err("more than 2 ov @ stage%u on left lm\n",
 					ovs[i].z_order);
 				return -EINVAL;
 			}
 			left_lm_zo_cnt[ovs[i].z_order]++;
 		} else {
 			if (right_lm_zo_cnt[ovs[i].z_order] == 2) {
-				pr_err("more than 2 ov @ stage%d on right lm\n",
+				pr_err("more than 2 ov @ stage%u on right lm\n",
 					ovs[i].z_order);
 				return -EINVAL;
 			}
@@ -4507,12 +4359,6 @@ int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 		}
 	}
 
-	if (mfd->panel_info->dynamic_cabc_enabled) {
-		rc = sysfs_create_group(&dev->kobj, &cabc_mode_attrs_group);
-		if (rc)
-			pr_warn("Fail to create CABC sysfs.\n");
-	}
-
 	if (mfd->panel_info->mipi.dynamic_switch_enabled ||
 			mfd->panel_info->type == MIPI_CMD_PANEL) {
 		rc = __vsync_retire_setup(mfd);
@@ -4527,15 +4373,6 @@ int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 					&factory_te_attrs_group);
 		if (rc) {
 			pr_err("Error factory te sysfs creation ret=%d\n", rc);
-			goto init_fail;
-		}
-	}
-
-	if (mfd->panel_info->hbm_feature_enabled) {
-		rc = sysfs_create_group(&dev->kobj,
-					&hbm_attrs_group);
-		if (rc) {
-			pr_err("Error for HBM sysfs creation ret = %d\n", rc);
 			goto init_fail;
 		}
 	}
