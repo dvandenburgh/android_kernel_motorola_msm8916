@@ -1034,36 +1034,11 @@ static void mdss_fb_restore_param(struct msm_fb_data_type *mfd)
 	mutex_unlock(&mfd->param_lock);
 }
 
-static ssize_t sre_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	const char *name;
-	ssize_t ret;
-
-	ret = mdss_fb_get_param(dev, PARAM_HBM_ID, &name);
-	if (ret < 0)
-		return ret;
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", name);
-}
-static ssize_t sre_store(struct device *dev,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	ssize_t ret;
-
-	if (!strcmp(buf, "2")) {
-		buf = "1";
-	}
-
-	ret = mdss_fb_set_param(dev, PARAM_HBM_ID, buf);
-	return ret ? ret : count;
-}
-
+__PARAM_SYSFS_DEFINITION(hbm, PARAM_HBM_ID)
 __PARAM_SYSFS_DEFINITION(cabc, PARAM_CABC_ID)
 
 static struct device_attribute param_attrs[PARAM_ID_NUM] = {
-	__ATTR(sre, S_IWUSR | S_IWGRP | S_IRUSR | S_IRGRP, sre_show, sre_store),
+	__ATTR(hbm, S_IWUSR | S_IWGRP | S_IRUSR | S_IRGRP, hbm_show, hbm_store),
 	__ATTR(cabc_mode, S_IWUSR | S_IWGRP | S_IRUSR | S_IRGRP,
 		cabc_show, cabc_store),
 };
@@ -1909,7 +1884,7 @@ int mdss_fb_alloc_fb_ion_memory(struct msm_fb_data_type *mfd, size_t fb_size)
 		goto fb_mmap_failed;
 	}
 
-	pr_debug("alloc 0x%zuB vaddr = %p (%pa iova) for fb%d\n", fb_size,
+	pr_debug("alloc 0x%zuB vaddr = %pK (%pa iova) for fb%d\n", fb_size,
 			vaddr, &mfd->iova, mfd->index);
 
 	mfd->fbi->screen_base = (char *) vaddr;
@@ -2002,7 +1977,7 @@ static int mdss_fb_fbmem_ion_mmap(struct fb_info *info,
 				vma->vm_page_prot =
 					pgprot_writecombine(vma->vm_page_prot);
 
-			pr_debug("vma=%p, addr=%x len=%ld\n",
+			pr_debug("vma=%pK, addr=%x len=%ld\n",
 					vma, (unsigned int)addr, len);
 			pr_debug("vm_start=%x vm_end=%x vm_page_prot=%ld\n",
 					(unsigned int)vma->vm_start,
@@ -2172,7 +2147,7 @@ static int mdss_fb_alloc_fbmem_iommu(struct msm_fb_data_type *mfd, int dom)
 	if (rc)
 		pr_warn("Cannot map fb_mem %pa to IOMMU. rc=%d\n", &phys, rc);
 
-	pr_debug("alloc 0x%zxB @ (%pa phys) (0x%p virt) (%pa iova) for fb%d\n",
+	pr_debug("alloc 0x%zxB @ (%pa phys) (0x%pK virt) (%pa iova) for fb%d\n",
 		 size, &phys, virt, &mfd->iova, mfd->index);
 
 	mfd->fbi->screen_base = virt;
