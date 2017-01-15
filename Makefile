@@ -384,6 +384,8 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Wno-shift-overflow \
 		   -Wno-bool-compare
 		   -std=gnu89
+		   -Wno-sequence-point \
+		   -Wno-unused-function \
 
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
