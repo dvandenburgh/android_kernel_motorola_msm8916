@@ -1,5 +1,5 @@
 ui_print("Mod     : FireKernel");
-ui_print("Version : v7.2");
+ui_print("Version : v8");
 ui_print("Device  : G3, G3-TE, E2");
 assert(getprop("ro.product.device") == "surnia" ||
        getprop("ro.product.device") == "surnia_umts" ||
