@@ -379,7 +379,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
 		   -fno-delete-null-pointer-checks \
-		   -std=gnu89
+		   -std=gnu89 \
 		   -Wno-sequence-point \
 		   -Wno-unused-function \
 
