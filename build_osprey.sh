@@ -31,7 +31,7 @@ red='\033[0;31m'
 nocol='\033[0m'
 export ARCH=arm
 export SUBARCH=arm
-export CROSS_COMPILE=~/android/kernel/toolchain/uber-6.0/bin/arm-eabi-
+export CROSS_COMPILE=~/android/kernel/toolchain/google-4.9/bin/arm-linux-androideabi-
 export KBUILD_BUILD_USER="aman"
 export KBUILD_BUILD_HOST="FireLord"
 rm -f arch/arm/boot/dts/*.dtb
